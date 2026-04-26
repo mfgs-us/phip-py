@@ -67,6 +67,8 @@ from phip.errors import (
     PhipError,
     TerminalState,
 )
+from phip.async_client import AsyncClient
+from phip.client import Client
 from phip.events import Event, hash_event, sign_event, verify_chain, verify_event
 from phip.tokens import Token, encode_token, mint_token, parse_token, verify_token
 from phip.uri import PhipUri, authority_of, format_uri, parse_uri
@@ -121,6 +123,9 @@ __all__ = [
     "mint_token",
     "parse_token",
     "verify_token",
+    # Clients
+    "AsyncClient",
+    "Client",
     # URI
     "PhipUri",
     "authority_of",

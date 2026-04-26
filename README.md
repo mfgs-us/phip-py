@@ -23,29 +23,71 @@ From source:
 pip install git+https://github.com/mfgs-us/phip-py
 ```
 
-## What's in the box
+## 30-line first integration
 
 ```python
-from phip import Client, sign_event, verify_event
+import uuid
+from datetime import datetime, timezone
+from phip import Client, generate_keypair, sign_event
 
-client = Client(base_url="https://acme.example", signing_key=key)
-obj = client.get("phip://acme.example/parts/widget-001")
-client.push(phip_id, event)
+AUTHORITY = "test.local"
+client = Client(base_url=f"http://127.0.0.1:8080", authority=AUTHORITY)
+
+# 1. Self-sign a bootstrap key actor (§11.2.4)
+kp = generate_keypair()
+key_id = f"phip://{AUTHORITY}/keys/bootstrap"
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+client.create(sign_event({
+    "event_id": str(uuid.uuid4()),
+    "phip_id": key_id, "type": "created", "timestamp": now,
+    "actor": key_id, "previous_hash": "genesis",
+    "payload": {"object_type": "actor", "state": "active",
+                "attributes": {"phip:keys": {**kp.jwk,
+                    "not_before": "2020-01-01T00:00:00Z",
+                    "not_after": "2099-01-01T00:00:00Z"}}},
+}, kp.private, key_id))
+
+# 2. Create a component object
+phip_id = f"phip://{AUTHORITY}/units/widget-001"
+client.create(sign_event({
+    "event_id": str(uuid.uuid4()),
+    "phip_id": phip_id, "type": "created", "timestamp": now,
+    "actor": key_id, "previous_hash": "genesis",
+    "payload": {"object_type": "component", "state": "concept"},
+}, kp.private, key_id))
+
+# 3. Read it back
+print(client.get(phip_id)["state"])  # → 'concept'
 ```
 
+Run a PhIP server locally (the [Node reference](https://github.com/mfgs-us/phip/tree/main/reference))
+to make this script work end-to-end:
+
+```bash
+git clone https://github.com/mfgs-us/phip
+cd phip/reference && npm install
+PHIP_AUTHORITY=test.local PHIP_PORT=8080 npm start
+```
+
+## What's in the box
+
 Both **sync** (`Client`) and **async** (`AsyncClient`) APIs are
-first-class. See `examples/` for end-to-end walkthroughs.
+first-class. The library covers:
 
-The library covers:
-
-- URI parsing
+- URI parsing (`parse_uri`, `format_uri`)
 - JCS canonicalization (RFC 8785)
-- Ed25519 sign / verify
-- Event signing + hash chain verification
-- Capability tokens (mint, parse, verify)
+- Ed25519 sign / verify, JWK helpers
+- Event signing + full hash-chain verification
+- Capability tokens (mint, parse, encode, verify)
 - HTTP operations: CREATE, GET, PUSH, QUERY, history, batch, /meta
+- Typed error hierarchy (one exception per spec error code)
+
+Coming in v0.1.0a2:
+
 - Foreign-authority key resolution (with SSRF defense)
 - PhIP bundle import / export
+- Subscription / polling helpers
 
 ## Conformance
 
