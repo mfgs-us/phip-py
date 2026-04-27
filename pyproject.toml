@@ -85,10 +85,7 @@ select = [
     "N",    # naming
     "ANN",  # type annotations
 ]
-ignore = [
-    "ANN101", # missing self type
-    "ANN102", # missing cls type
-]
+ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "S101"]

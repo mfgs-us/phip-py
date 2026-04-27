@@ -168,6 +168,61 @@ def test_unknown_event_key_rejected(keypair_data) -> None:
         verify_bundle(bundle)
 
 
+def test_bare_keyid_with_foreign_actor_rejected(keypair_data) -> None:
+    """Forgery vector: an event whose `actor` claims a foreign actor URI
+    but whose `signature.key_id` is a bare unknown id. The producer-key
+    fallback in `_resolve_event_key` MUST refuse to handle it, otherwise
+    a malicious bundle could mint events that *appear* to come from
+    other actors but are actually signed by the producer."""
+    alice = next(k for k in keypair_data if k["id"] == "test-key-alice")
+    kp = keypair_from_pkcs8(base64.b64decode(alice["private_pkcs8_b64"]))
+    producer_uri = "phip://acme.example/keys/alice"
+    obj_phip_id = "phip://acme.example/parts/x"
+
+    # Sign an event WITH the producer's key but claim a foreign actor.
+    forged = sign_event(
+        {
+            "event_id": "00000000-0000-4000-a000-000000000099",
+            "phip_id": obj_phip_id,
+            "type": "created",
+            "timestamp": "2026-04-01T00:00:00Z",
+            "actor": "phip://other-org.example/actors/innocent-bystander",
+            "previous_hash": "genesis",
+            "payload": {"object_type": "component", "state": "stock"},
+        },
+        kp.private,
+        "unknown-bare-id",  # signed_event records this as key_id
+    )
+
+    bundle = make_bundle(
+        authority="acme.example",
+        created_by=producer_uri,
+        created_at="2026-04-15T00:00:00Z",
+        objects=[{"phip_id": obj_phip_id}],
+        history={obj_phip_id: [forged]},
+        keys={
+            producer_uri: {
+                "phip_id": producer_uri,
+                "object_type": "actor",
+                "state": "active",
+                "attributes": {
+                    "phip:keys": {
+                        **kp.jwk,
+                        "not_before": "2020-01-01T00:00:00Z",
+                        "not_after": "2099-01-01T00:00:00Z",
+                    }
+                },
+                "history": [],
+            }
+        },
+        private_key=kp.private,
+        key_id=producer_uri,
+    )
+
+    with pytest.raises(KeyNotFound):
+        verify_bundle(bundle)
+
+
 def test_bundle_with_snapshot_of_round_trips(keypair_data) -> None:
     alice = next(k for k in keypair_data if k["id"] == "test-key-alice")
     kp = keypair_from_pkcs8(base64.b64decode(alice["private_pkcs8_b64"]))

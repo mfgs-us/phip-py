@@ -5,15 +5,26 @@ to resolve that key by GETting the corresponding actor object. This
 module provides an async ``FederationClient`` that does so safely:
 
 * HTTPS by default (HTTP requires explicit ``allow_http=True``)
-* Pre-resolves the target hostname via DNS and rejects private /
-  loopback / link-local addresses (SSRF defense)
-* Pins the resolved IP for the connection (defeats DNS rebinding)
-* Caps response body size at 1 MiB
+* Pre-resolves the target hostname via DNS and rejects all returned
+  addresses if any are private / loopback / link-local (SSRF defense
+  + multi-A bypass defense)
+* Caps response body size at 1 MiB, enforced mid-stream
 * Clamps server-supplied ``Cache-Control: max-age`` at 24 hours
 * 10s request timeout
 
 This is the Python port of ``reference/src/federation.js`` from the
-spec repo, with the same security defenses.
+spec repo. **Known v0.1 gap:** the resolved IP is NOT pinned for the
+actual connection (httpx re-resolves), so a sufficiently fast attacker
+who controls DNS can in principle race a rebind between the check and
+the connect. Full pinning is a v0.2 hardening; the SSRF block remains
+the larger win and the rebind window is narrow on most stacks.
+
+**Caller responsibilities not enforced here:**
+
+* ``resolve_key`` validates ``state == "active"`` but NOT the JWK's
+  ``not_before`` / ``not_after`` window. Callers verifying a token
+  MUST also check the signing key was within its validity window at
+  the token's claimed signing time (see Section 11.2.2).
 """
 
 from __future__ import annotations
@@ -22,8 +33,9 @@ import asyncio
 import re
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -122,7 +134,7 @@ class FederationClient:
         scheme = "http" if self.allow_http else "https"
         return f"{scheme}://{authority}{path}"
 
-    async def _cached_json_get(self, url: str) -> Any:
+    async def _cached_json_get(self, url: str) -> Any:  # noqa: ANN401  # foreign JSON
         now = time.monotonic()
         cached = self._cache.get(url)
         if cached is not None and cached.expires_at > now:
@@ -160,38 +172,40 @@ class FederationClient:
                         "refusing to connect to private/loopback/link-local address"
                     )
 
-        # Build a transport that pins the resolved address. httpx provides
-        # this via a custom AsyncHTTPTransport with `local_address` not
-        # being the right knob; instead we override resolution by passing
-        # `host_header` and an explicit URL to the resolved IP.
-        # Simpler approach for v0.1.0a2: trust the DNS resolution we just
-        # did and pass the URL as-is. We've already verified no private
-        # IPs leaked through. Full pinning (rebind defense) is a v0.2
-        # hardening; the SSRF block is the larger win.
+        # Stream the response so the 1 MiB cap fires mid-flight rather
+        # than after a multi-GB body has been buffered into memory. We
+        # already DNS-resolved + private-IP-checked above; full DNS
+        # rebinding pinning (passing `host=<resolved-ip>` to httpx) is a
+        # v0.2 hardening — see the module docstring for the v0.1 stance.
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             try:
-                response = await client.get(url)
+                async with client.stream("GET", url) as response:
+                    if response.status_code != 200:
+                        raise ValueError(
+                            f"federation GET returned status {response.status_code}"
+                        )
+                    headers = dict(response.headers)
+                    body = await self._read_capped(response)
             except httpx.RequestError as e:
                 raise ValueError("federation request failed") from e
-            await self._enforce_size_cap(response)
-            if response.status_code != 200:
-                raise ValueError(
-                    f"federation GET returned status {response.status_code}"
-                )
             try:
-                return response.json(), dict(response.headers)
+                import json as _json
+
+                return _json.loads(body), headers
             except ValueError as e:
                 raise ValueError("federation response was not valid JSON") from e
 
     @staticmethod
-    async def _enforce_size_cap(response: httpx.Response) -> None:
-        # httpx already streams; if the content is over the cap we reject.
-        # `response.content` materializes the body — if it's too large,
-        # we still reject before letting it propagate further. For truly
-        # adversarial 100GB streams, callers should prefer ``stream()``;
-        # the cap here protects the verification path.
-        if len(response.content) > MAX_RESPONSE_BYTES:
-            raise ValueError("federation response exceeded size cap")
+    async def _read_capped(response: httpx.Response) -> bytes:
+        """Drain the response body, rejecting once MAX_RESPONSE_BYTES bytes
+        have arrived. The check happens DURING streaming, so an adversarial
+        multi-GB body is rejected before it's buffered."""
+        buf = bytearray()
+        async for chunk in response.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) > MAX_RESPONSE_BYTES:
+                raise ValueError("federation response exceeded size cap")
+        return bytes(buf)
 
 
 # ── helpers ───────────────────────────────────────────────────────
@@ -252,9 +266,7 @@ def _is_private_v4(addr: str) -> bool:
         return True
     if a == 192 and b == 168:  # RFC1918
         return True
-    if a >= 224:  # multicast / reserved / broadcast
-        return True
-    return False
+    return a >= 224  # multicast / reserved / broadcast
 
 
 def _is_private_v6(addr: str) -> bool:
@@ -271,6 +283,4 @@ def _is_private_v6(addr: str) -> bool:
     if re.match(r"^f[cd][0-9a-f][0-9a-f]:", addr):
         return True
     # Multicast ff00::/8.
-    if re.match(r"^ff[0-9a-f][0-9a-f]:", addr):
-        return True
-    return False
+    return bool(re.match(r"^ff[0-9a-f][0-9a-f]:", addr))

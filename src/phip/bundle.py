@@ -20,8 +20,9 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import quote, unquote
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -189,7 +190,13 @@ def verify_bundle(
                     f"event[{i}] in {phip_id} missing signature",
                     {"phip_id": phip_id, "index": i},
                 )
-            event_key = _resolve_event_key(bundle, ev_sig["key_id"], producer_key)
+            event_key = _resolve_event_key(
+                bundle,
+                ev_sig["key_id"],
+                producer_key,
+                producer_key_uri=str(manifest["created_by"]),
+                event_actor=event.get("actor"),
+            )
             if event_key is None:
                 raise KeyNotFound(
                     f"event[{i}] in {phip_id} references unknown key {ev_sig['key_id']}",
@@ -227,23 +234,30 @@ def _resolve_event_key(
     bundle: Bundle,
     key_id: str,
     producer_key: Ed25519PublicKey,
+    *,
+    producer_key_uri: str,
+    event_actor: str | None,
 ) -> Ed25519PublicKey | None:
     """Resolve an event's `signature.key_id` to a public key.
 
     Lookup order:
 
     1. Full PhIP URI match in `bundle.keys`.
-    2. Bare keypair id (no `phip://` prefix) matching the tail of
-       any embedded key's URI — bundles produced by the canonical
+    2. Bare keypair id (no `phip://` prefix) matching the tail of any
+       embedded key's URI — bundles produced by the canonical
        generator use bare ids in event signatures, deferring to the
        manifest's producer-signed integrity envelope.
-    3. The producer's key as a final fallback. Bundles are an
-       integrity unit anchored at the manifest signature; an event
-       whose key_id doesn't resolve is treated as signed by the
-       producer (the actor who attested the bundle).
+    3. The producer's key as a constrained fallback. Permitted ONLY
+       when ``event.actor`` matches ``producer_key_uri`` — i.e., the
+       event claims the producer is the actor. Without this guard, a
+       malicious bundle could mint events whose ``actor`` field claims
+       to be a foreign actor while the bare ``key_id`` falls through
+       to the producer's key, fooling downstream code that trusts
+       ``event.actor`` after a successful chain verification.
 
-    Returns None only if `key_id` looks like a URI but isn't in the
-    embedded keys (real cross-actor reference that can't be resolved).
+    Returns None when no rule applies (URI form not in keys, or bare
+    id with no tail match and ``event.actor`` doesn't equal the
+    producer's URI).
     """
     # 1. Full URI match.
     found = _embedded_key(bundle, key_id)
@@ -254,9 +268,13 @@ def _resolve_event_key(
         for uri in bundle.keys:
             if uri.endswith("/" + key_id):
                 return _embedded_key(bundle, uri)
-        # No tail match → fall through to producer key.
-        return producer_key
-    # 3. URI form but not in bundle: treat as unresolved.
+        # 3. Producer-key fallback, but only when the event actually
+        # claims to come from the producer. This blocks the "foreign
+        # actor with bare unknown key_id" forgery vector.
+        if event_actor == producer_key_uri:
+            return producer_key
+    # URI form but not in bundle, or bare id whose actor isn't the
+    # producer: unresolved.
     return None
 
 

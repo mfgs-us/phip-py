@@ -8,7 +8,7 @@ Python client library for the
 federated protocol for addressing, querying, and exchanging information
 about physical objects across organizational boundaries.
 
-> **Status:** `0.1.0a1` (alpha). Implements PhIP spec `0.1.0-draft`,
+> **Status:** `0.1.0a2` (alpha). Implements PhIP spec `0.1.0-draft`,
 > which itself is unstable until v1.0. Expect breaking changes.
 
 ## Install

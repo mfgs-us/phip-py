@@ -27,7 +27,7 @@ Adds federation client + bundle support.
   - `pack_bundle(bundle) -> bytes` and `unpack_bundle(bytes) -> Bundle`
     for the on-disk tar transport
   - `bundle_from_dict(d)` for the inline test-vector form
-- 35-case private-IP filter test (covers IPv4 + IPv6 + the Node
+- 32-case private-IP filter test (covers IPv4 + IPv6 + the Node
   reference's previously-discovered `fe81::`–`fe8f::` link-local hole)
 - Bundle vector tests: one-object accept, multi-object accept,
   tampered-event reject; round-trip make → pack → unpack → verify;
@@ -35,7 +35,24 @@ Adds federation client + bundle support.
 
 ### Tested
 
-Total: 106 tests passing (was 60 in a1).
+Total: 107 tests passing (was 60 in a1).
+
+### Hardened (post-review)
+
+- **R1: streaming size cap.** `FederationClient` now reads the response
+  body via `client.stream(...)` + `aiter_bytes`, rejecting once the
+  1 MiB cap is reached. Previous code materialized the full body into
+  `response.content` first, OOM-able by an adversarial multi-GB body.
+- **R2: bundle producer-key fallback constrained.** The producer-key
+  fallback in `_resolve_event_key` now requires `event.actor` to equal
+  the producer's URI. Without this guard, a malicious bundle could
+  mint events whose `actor` claimed a foreign actor URI but whose
+  bare `signature.key_id` fell through to the producer's key, fooling
+  downstream code that trusts `event.actor` after a successful chain
+  verification.
+- **Module docstring** for `phip.federation` updated to remove the
+  inaccurate "pins resolved IP" claim and explicitly note the v0.1
+  rebind window plus the JWK validity-window caller responsibility.
 
 ## [0.1.0a1] — Unreleased
 
