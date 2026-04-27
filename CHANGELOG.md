@@ -5,6 +5,55 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this library follows [SemVer](https://semver.org/) and pins to spec
 MAJOR per the PhIP [VERSIONING.md](https://github.com/mfgs-us/phip/blob/main/VERSIONING.md).
 
+## [0.1.0a2] — Unreleased
+
+Adds federation client + bundle support.
+
+### Added
+
+- **`FederationClient`**: async outbound HTTPS for foreign-authority
+  `/meta` and key-actor resolution. Mirrors `reference/src/federation.js`
+  in the spec repo:
+  - HTTPS by default; `allow_http=True` for tests
+  - DNS pre-resolution + private/loopback/link-local rejection
+    (RFC 1918, CGNAT, IPv6 fe80::/10, fc00::/7, ff00::/8 etc.)
+  - Cache TTL respects `Cache-Control: max-age` clamped at 24h
+  - 1 MiB response cap, 10s request timeout
+  - `url_builder` test hook for mapping authority names to localhost ports
+- **Bundle module** (`phip.bundle`): pack / unpack / verify per §4.3.4:
+  - `make_bundle(...)` — produce a signed bundle from objects + history
+  - `verify_bundle(bundle)` — full integrity check (manifest signature
+    + per-object chain + per-event signatures)
+  - `pack_bundle(bundle) -> bytes` and `unpack_bundle(bytes) -> Bundle`
+    for the on-disk tar transport
+  - `bundle_from_dict(d)` for the inline test-vector form
+- 32-case private-IP filter test (covers IPv4 + IPv6 + the Node
+  reference's previously-discovered `fe81::`–`fe8f::` link-local hole)
+- Bundle vector tests: one-object accept, multi-object accept,
+  tampered-event reject; round-trip make → pack → unpack → verify;
+  unknown-key rejection; `snapshot_of` round trip
+
+### Tested
+
+Total: 107 tests passing (was 60 in a1).
+
+### Hardened (post-review)
+
+- **R1: streaming size cap.** `FederationClient` now reads the response
+  body via `client.stream(...)` + `aiter_bytes`, rejecting once the
+  1 MiB cap is reached. Previous code materialized the full body into
+  `response.content` first, OOM-able by an adversarial multi-GB body.
+- **R2: bundle producer-key fallback constrained.** The producer-key
+  fallback in `_resolve_event_key` now requires `event.actor` to equal
+  the producer's URI. Without this guard, a malicious bundle could
+  mint events whose `actor` claimed a foreign actor URI but whose
+  bare `signature.key_id` fell through to the producer's key, fooling
+  downstream code that trusts `event.actor` after a successful chain
+  verification.
+- **Module docstring** for `phip.federation` updated to remove the
+  inaccurate "pins resolved IP" claim and explicitly note the v0.1
+  rebind window plus the JWK validity-window caller responsibility.
+
 ## [0.1.0a1] — Unreleased
 
 Initial alpha. Implements PhIP spec `0.1.0-draft` for client-side
