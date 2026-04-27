@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phip"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "PhIP (Physical Information Protocol) client library for Python. Implements the v0.1.0-draft spec at github.com/mfgs-us/phip."
 readme = "README.md"
 license = { file = "LICENSE" }

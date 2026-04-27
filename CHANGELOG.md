@@ -5,6 +5,38 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this library follows [SemVer](https://semver.org/) and pins to spec
 MAJOR per the PhIP [VERSIONING.md](https://github.com/mfgs-us/phip/blob/main/VERSIONING.md).
 
+## [0.1.0a2] — Unreleased
+
+Adds federation client + bundle support.
+
+### Added
+
+- **`FederationClient`**: async outbound HTTPS for foreign-authority
+  `/meta` and key-actor resolution. Mirrors `reference/src/federation.js`
+  in the spec repo:
+  - HTTPS by default; `allow_http=True` for tests
+  - DNS pre-resolution + private/loopback/link-local rejection
+    (RFC 1918, CGNAT, IPv6 fe80::/10, fc00::/7, ff00::/8 etc.)
+  - Cache TTL respects `Cache-Control: max-age` clamped at 24h
+  - 1 MiB response cap, 10s request timeout
+  - `url_builder` test hook for mapping authority names to localhost ports
+- **Bundle module** (`phip.bundle`): pack / unpack / verify per §4.3.4:
+  - `make_bundle(...)` — produce a signed bundle from objects + history
+  - `verify_bundle(bundle)` — full integrity check (manifest signature
+    + per-object chain + per-event signatures)
+  - `pack_bundle(bundle) -> bytes` and `unpack_bundle(bytes) -> Bundle`
+    for the on-disk tar transport
+  - `bundle_from_dict(d)` for the inline test-vector form
+- 35-case private-IP filter test (covers IPv4 + IPv6 + the Node
+  reference's previously-discovered `fe81::`–`fe8f::` link-local hole)
+- Bundle vector tests: one-object accept, multi-object accept,
+  tampered-event reject; round-trip make → pack → unpack → verify;
+  unknown-key rejection; `snapshot_of` round trip
+
+### Tested
+
+Total: 106 tests passing (was 60 in a1).
+
 ## [0.1.0a1] — Unreleased
 
 Initial alpha. Implements PhIP spec `0.1.0-draft` for client-side

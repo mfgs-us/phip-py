@@ -82,12 +82,16 @@ first-class. The library covers:
 - Capability tokens (mint, parse, encode, verify)
 - HTTP operations: CREATE, GET, PUSH, QUERY, history, batch, /meta
 - Typed error hierarchy (one exception per spec error code)
+- Foreign-authority key resolution via `FederationClient` (HTTPS-only
+  by default, DNS pre-resolution + private-IP block, 24h cache TTL
+  ceiling, 1 MiB response cap)
+- PhIP bundle pack / unpack / verify (`phip.bundle.make_bundle`,
+  `pack_bundle`, `unpack_bundle`, `verify_bundle`)
 
-Coming in v0.1.0a2:
+Coming later:
 
-- Foreign-authority key resolution (with SSRF defense)
-- PhIP bundle import / export
 - Subscription / polling helpers
+- Retry policy customization
 
 ## Conformance
 
