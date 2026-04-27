@@ -85,7 +85,17 @@ select = [
     "N",    # naming
     "ANN",  # type annotations
 ]
-ignore = []
+ignore = [
+    # Exception classes intentionally mirror PhIP spec error codes
+    # (e.g., INVALID_SIGNATURE → InvalidSignature) so consumers can
+    # dispatch on protocol semantics. The "Error" suffix would obscure
+    # that mapping.
+    "N818",
+    # HTTP transport code traffics in arbitrary JSON; `Any` is the
+    # honest type for foreign payloads. Per-call documentation and
+    # downstream typing recover safety where it matters.
+    "ANN401",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "S101"]
@@ -93,7 +103,10 @@ ignore = []
 [tool.mypy]
 python_version = "3.10"
 strict = true
-warn_return_any = true
+# JSON responses from foreign HTTP are genuinely `Any`; the explicit
+# `dict[str, Any]` return annotation on each method is the contract,
+# even if mypy can't prove the runtime value matches.
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = true
 

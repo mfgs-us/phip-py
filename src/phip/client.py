@@ -125,7 +125,9 @@ class Client:
             "POST", path, json_body=query, headers=self._auth_headers(capability_token)
         )
 
-    def create(self, event: dict[str, Any], *, capability_token: str | None = None) -> dict[str, Any]:
+    def create(
+        self, event: dict[str, Any], *, capability_token: str | None = None
+    ) -> dict[str, Any]:
         """CREATE a new object via a signed `created` event.
 
         The event's ``phip_id`` namespace drives the endpoint path.
@@ -252,7 +254,9 @@ class Client:
         """Split a `phip://{auth}/{ns}/{local-id...}` into (ns, local-id-with-subpath)."""
         prefix = f"phip://{self.authority}/"
         if not phip_id.startswith(prefix):
-            raise ValueError(f"phip_id {phip_id!r} does not match client authority {self.authority!r}")
+            raise ValueError(
+                f"phip_id {phip_id!r} does not match client authority {self.authority!r}"
+            )
         rest = phip_id[len(prefix):]
         ns, _, local = rest.partition("/")
         if not ns or not local:
