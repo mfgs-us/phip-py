@@ -62,13 +62,14 @@ client.create(sign_event({
 print(client.get(phip_id)["state"])  # → 'concept'
 ```
 
-Run a PhIP server locally (the [Node reference](https://github.com/mfgs-us/phip/tree/main/reference))
+Run a PhIP server locally
+([phip-server](https://github.com/mfgs-us/phip-server))
 to make this script work end-to-end:
 
 ```bash
-git clone https://github.com/mfgs-us/phip
-cd phip/reference && npm install
-PHIP_AUTHORITY=test.local PHIP_PORT=8080 npm start
+git clone https://github.com/mfgs-us/phip-server
+cd phip-server
+PHIP_AUTHORITY=test.local docker compose up
 ```
 
 ## What's in the box
@@ -101,7 +102,7 @@ phip-py passes:
 - The language-agnostic [test vectors](https://github.com/mfgs-us/phip/tree/main/tests/vectors)
   byte-for-byte (JCS, Ed25519, hash chains, lifecycle, tokens, bundles)
 - The [HTTP conformance suite](https://github.com/mfgs-us/phip/tree/main/tests/conformance)
-  against the [reference resolver](https://github.com/mfgs-us/phip/tree/main/reference)
+  against [phip-server](https://github.com/mfgs-us/phip-server)
 
 Run the test suite:
 
