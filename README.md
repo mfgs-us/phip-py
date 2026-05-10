@@ -123,6 +123,11 @@ for full rules.
 from phip import PROTOCOL_VERSION  # "0.1.0-draft"
 ```
 
+## Releasing
+
+See [RELEASING.md](./RELEASING.md) — releases are tag-driven and
+publish to PyPI via trusted publishing (OIDC, no API tokens in CI).
+
 ## Out of scope
 
 This library is client-only:
