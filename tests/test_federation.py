@@ -13,7 +13,6 @@ from phip.federation import (
     is_private_address,
 )
 
-
 # ── private-address filter — matches the Node reference's coverage ──
 
 
@@ -129,13 +128,13 @@ async def test_resolve_key_against_reference(reference_server) -> None:
     # Reuse the integration_reference fixture pattern: spin our own
     # short-lived reference here (the existing fixture is for sync
     # tests; this is async-only).
-    REFERENCE_PATH = Path(
+    reference_path = Path(
         os.environ.get(
             "PHIP_REFERENCE_PATH",
             Path(__file__).resolve().parents[2] / "phip" / "reference",
         )
     ).resolve()
-    if not REFERENCE_PATH.exists() or not (REFERENCE_PATH / "node_modules").exists():
+    if not reference_path.exists() or not (reference_path / "node_modules").exists():
         pytest.skip("reference resolver unavailable")
 
     with socket.socket() as s:
@@ -143,9 +142,9 @@ async def test_resolve_key_against_reference(reference_server) -> None:
         port = s.getsockname()[1]
     authority = "fed-test.local"
     proc = subprocess.Popen(
-        ["node", str(REFERENCE_PATH / "src" / "index.js")],
+        ["node", str(reference_path / "src" / "index.js")],
         env={**os.environ, "PHIP_AUTHORITY": authority, "PHIP_PORT": str(port)},
-        cwd=REFERENCE_PATH,
+        cwd=reference_path,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -217,3 +216,200 @@ async def test_resolve_key_against_reference(reference_server) -> None:
 def reference_server() -> None:
     """Sentinel; the actual logic lives in the test body."""
     return None
+
+
+# ── JWK validity-window enforcement (§11.2.2) ──────────────────────
+
+
+def test_validate_jwk_window_at_inside_passes() -> None:
+    from datetime import datetime, timezone
+
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2030-01-01T00:00:00Z",
+    }
+    at = datetime(2027, 6, 1, tzinfo=timezone.utc)
+    _validate_jwk_window(jwk, at, "phip://test/keys/k")  # MUST NOT raise
+
+
+def test_validate_jwk_window_before_not_before_raises_key_expired() -> None:
+    from datetime import datetime, timezone
+
+    from phip.errors import KeyExpired
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2030-01-01T00:00:00Z",
+    }
+    at = datetime(2025, 12, 31, tzinfo=timezone.utc)
+    with pytest.raises(KeyExpired) as exc:
+        _validate_jwk_window(jwk, at, "phip://test/keys/k")
+    assert "not yet valid" in str(exc.value)
+    assert exc.value.details.get("not_before") == "2026-01-01T00:00:00Z"
+
+
+def test_validate_jwk_window_after_not_after_raises_key_expired() -> None:
+    from datetime import datetime, timezone
+
+    from phip.errors import KeyExpired
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2026-12-31T23:59:59Z",
+    }
+    at = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    with pytest.raises(KeyExpired) as exc:
+        _validate_jwk_window(jwk, at, "phip://test/keys/k")
+    assert "expired" in str(exc.value)
+
+
+def test_validate_jwk_window_missing_not_before_raises_value_error() -> None:
+    from datetime import datetime, timezone
+
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_after": "2030-01-01T00:00:00Z",
+    }
+    at = datetime(2027, 6, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="missing not_before"):
+        _validate_jwk_window(jwk, at, "phip://test/keys/k")
+
+
+def test_validate_jwk_window_missing_not_after_raises_value_error() -> None:
+    from datetime import datetime, timezone
+
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_before": "2026-01-01T00:00:00Z",
+    }
+    at = datetime(2027, 6, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="missing not_after"):
+        _validate_jwk_window(jwk, at, "phip://test/keys/k")
+
+
+# ── Cache integration: HIT, expiry, TTL clamp, default TTL ─────────
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_skips_network() -> None:
+    """Same URL fetched twice: the second call returns the cached value
+    WITHOUT a second `_json_get` call."""
+    import time as _time
+
+    from phip.federation import FederationClient
+
+    fed = FederationClient(allow_http=True)
+    calls: list[str] = []
+
+    async def fake_json_get(url: str) -> tuple[object, dict[str, str]]:
+        calls.append(url)
+        return ({"hello": "world"}, {})
+
+    fed._json_get = fake_json_get  # type: ignore[method-assign]
+
+    a = await fed._cached_json_get("http://test.example/x")
+    b = await fed._cached_json_get("http://test.example/x")
+    assert a == {"hello": "world"}
+    assert b == {"hello": "world"}
+    assert len(calls) == 1, f"expected 1 network call, got {len(calls)}"
+    # And the cache entry exists.
+    assert "http://test.example/x" in fed._cache
+    assert fed._cache["http://test.example/x"].expires_at > _time.monotonic()
+
+
+@pytest.mark.asyncio
+async def test_cache_miss_after_expiry_refetches() -> None:
+    """Backdating the cache entry forces a re-fetch on the next call."""
+    import time as _time
+
+    from phip.federation import FederationClient, _CacheEntry
+
+    fed = FederationClient(allow_http=True)
+    calls: list[str] = []
+
+    async def fake_json_get(url: str) -> tuple[object, dict[str, str]]:
+        calls.append(url)
+        return ({"call": len(calls)}, {})
+
+    fed._json_get = fake_json_get  # type: ignore[method-assign]
+
+    first = await fed._cached_json_get("http://test.example/x")
+    # Backdate the entry to force a miss on the next call.
+    fed._cache["http://test.example/x"] = _CacheEntry(
+        value=first, expires_at=_time.monotonic() - 1
+    )
+    second = await fed._cached_json_get("http://test.example/x")
+    assert first == {"call": 1}
+    assert second == {"call": 2}
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_cache_ttl_clamped_at_24h() -> None:
+    """A response advertising a giant max-age MUST NOT pin past the
+    24h ceiling — defends against a malicious authority pinning a
+    forged key for years."""
+    import time as _time
+
+    from phip.federation import MAX_TTL_SECONDS, FederationClient
+
+    fed = FederationClient(allow_http=True)
+
+    async def fake_json_get(url: str) -> tuple[object, dict[str, str]]:
+        return ({}, {"cache-control": "public, max-age=99999999"})
+
+    fed._json_get = fake_json_get  # type: ignore[method-assign]
+
+    before = _time.monotonic()
+    await fed._cached_json_get("http://test.example/x")
+    entry = fed._cache["http://test.example/x"]
+    # Allow a small slop (~1s) for monotonic clock progression.
+    assert entry.expires_at <= before + MAX_TTL_SECONDS + 1
+
+
+@pytest.mark.asyncio
+async def test_cache_default_ttl_when_no_cache_control() -> None:
+    """No Cache-Control header → DEFAULT_TTL_SECONDS (5 minutes)."""
+    import time as _time
+
+    from phip.federation import DEFAULT_TTL_SECONDS, FederationClient
+
+    fed = FederationClient(allow_http=True)
+
+    async def fake_json_get(url: str) -> tuple[object, dict[str, str]]:
+        return ({}, {})  # no Cache-Control
+
+    fed._json_get = fake_json_get  # type: ignore[method-assign]
+
+    before = _time.monotonic()
+    await fed._cached_json_get("http://test.example/x")
+    entry = fed._cache["http://test.example/x"]
+    # Expires at ~ before + DEFAULT_TTL_SECONDS, with small slop.
+    assert before + DEFAULT_TTL_SECONDS - 1 <= entry.expires_at
+    assert entry.expires_at <= before + DEFAULT_TTL_SECONDS + 1
+
+
+def test_validate_jwk_window_naive_datetime_assumed_utc() -> None:
+    """Naïve datetimes are treated as UTC rather than rejected, since the
+    spec uses UTC ISO 8601 throughout and naïve is a common Python pitfall."""
+    from datetime import datetime
+
+    from phip.federation import _validate_jwk_window
+
+    jwk = {
+        "kty": "OKP", "crv": "Ed25519", "x": "x" * 43,
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2030-01-01T00:00:00Z",
+    }
+    _validate_jwk_window(jwk, datetime(2027, 6, 1), "phip://test/keys/k")

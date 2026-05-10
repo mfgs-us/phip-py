@@ -1,5 +1,6 @@
 # phip — PhIP client library for Python
 
+[![CI](https://github.com/mfgs-us/phip-py/actions/workflows/ci.yml/badge.svg)](https://github.com/mfgs-us/phip-py/actions/workflows/ci.yml)
 [![spec](https://img.shields.io/badge/spec-v0.1.0--draft-blue)](https://github.com/mfgs-us/phip)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 

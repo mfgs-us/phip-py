@@ -35,7 +35,7 @@ Adds federation client + bundle support.
 
 ### Tested
 
-Total: 107 tests passing (was 60 in a1).
+Total: 117 tests passing (was 60 in a1).
 
 ### Hardened (post-review)
 
@@ -50,9 +50,25 @@ Total: 107 tests passing (was 60 in a1).
   bare `signature.key_id` fell through to the producer's key, fooling
   downstream code that trusts `event.actor` after a successful chain
   verification.
+- **R3: JWK validity-window enforcement.** `FederationClient.resolve_key`
+  now accepts an optional `at: datetime` argument; when supplied, the
+  resolver raises `KeyExpired` if the JWK's `not_before`/`not_after`
+  window does not bracket `at`, or `ValueError` if the JWK lacks the
+  validity-window fields. Naïve `datetime`s are assumed UTC. This
+  closes the documented gap where callers had to enforce the window
+  themselves and any miss silently accepted out-of-window keys.
 - **Module docstring** for `phip.federation` updated to remove the
-  inaccurate "pins resolved IP" claim and explicitly note the v0.1
-  rebind window plus the JWK validity-window caller responsibility.
+  inaccurate "pins resolved IP" claim and explicitly document the v0.1
+  rebind window and the now-built-in JWK validity-window check.
+
+### Infrastructure
+
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): pytest matrix
+  across Python 3.10 / 3.11 / 3.12 / 3.13, plus ruff and mypy on
+  3.12. Independent jobs; concurrency cancels superseded runs.
+- **Cache integration tests** (4): cache-hit suppression of network
+  fetch, miss-after-expiry refetch, 24h TTL clamp end-to-end, default
+  TTL when no `Cache-Control` header is returned.
 
 ## [0.1.0a1] — Unreleased
 

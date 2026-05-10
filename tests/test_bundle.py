@@ -8,7 +8,6 @@ import pytest
 
 from phip.bundle import (
     BUNDLE_VERSION,
-    Bundle,
     bundle_from_dict,
     make_bundle,
     pack_bundle,

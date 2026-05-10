@@ -19,12 +19,12 @@ who controls DNS can in principle race a rebind between the check and
 the connect. Full pinning is a v0.2 hardening; the SSRF block remains
 the larger win and the rebind window is narrow on most stacks.
 
-**Caller responsibilities not enforced here:**
-
-* ``resolve_key`` validates ``state == "active"`` but NOT the JWK's
-  ``not_before`` / ``not_after`` window. Callers verifying a token
-  MUST also check the signing key was within its validity window at
-  the token's claimed signing time (see Section 11.2.2).
+**JWK validity window:** ``resolve_key`` accepts an optional ``at``
+datetime; when supplied, the JWK's ``not_before`` / ``not_after``
+window is enforced and out-of-window keys raise ``KeyExpired``.
+Callers verifying a token SHOULD pass the token's ``not_before`` as
+the anchor (§11.2.2). Without ``at``, the validity window is not
+checked — preserved for callers that don't have a signing anchor.
 """
 
 from __future__ import annotations
@@ -35,11 +35,13 @@ import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from phip.errors import KeyExpired
 from phip.uri import parse_uri
 
 DEFAULT_TTL_SECONDS = 5 * 60
@@ -100,11 +102,27 @@ class FederationClient:
         )
         return await self._cached_json_get(url)
 
-    async def resolve_key(self, key_id: str) -> dict[str, str]:
+    async def resolve_key(
+        self, key_id: str, *, at: datetime | None = None
+    ) -> dict[str, str]:
         """Resolve a `key_id` PhIP URI to its JWK (`phip:keys`) material.
 
-        Raises ``ValueError`` if the target isn't an active actor or
-        doesn't carry well-formed Ed25519 JWK material.
+        When ``at`` is provided, the JWK's ``not_before`` / ``not_after``
+        validity window is enforced: a key whose window does not cover
+        ``at`` raises ``KeyExpired``. Per spec §11.2.2, callers verifying
+        a token MUST supply ``at`` (typically the token's ``not_before``)
+        so that backdated forgeries against a not-yet-provisioned key
+        are rejected.
+
+        When ``at`` is ``None`` (default), no validity check runs — kept
+        for backwards compat and for callers that don't have a signing
+        anchor (e.g., interactively inspecting a key).
+
+        Raises:
+            ValueError: target isn't an active actor, or the JWK is
+                malformed (missing kty/crv/x, or — when ``at`` is
+                supplied — missing not_before/not_after).
+            KeyExpired: ``at`` is outside the JWK's validity window.
         """
         obj = await self.fetch_key_resource(key_id)
         if not isinstance(obj, dict) or obj.get("object_type") != "actor":
@@ -120,6 +138,8 @@ class FederationClient:
             or not jwk.get("x")
         ):
             raise ValueError(f"foreign key actor missing phip:keys material: {key_id}")
+        if at is not None:
+            _validate_jwk_window(jwk, at, key_id)
         return jwk
 
     def clear_cache(self) -> None:
@@ -209,6 +229,55 @@ class FederationClient:
 
 
 # ── helpers ───────────────────────────────────────────────────────
+
+
+def _validate_jwk_window(jwk: dict[str, Any], at: datetime, key_id: str) -> None:
+    """Enforce the JWK's ``not_before`` / ``not_after`` window covers ``at``.
+
+    Both fields are REQUIRED on a `phip:keys` JWK (§11.2.1). A JWK that
+    omits either is structurally malformed and raises ``ValueError``.
+
+    A JWK whose window does not cover ``at`` raises ``KeyExpired`` —
+    the same code an out-of-window event signature would raise via
+    the resolver path.
+    """
+    nb_str = jwk.get("not_before")
+    na_str = jwk.get("not_after")
+    if not isinstance(nb_str, str) or not nb_str:
+        raise ValueError(f"foreign key {key_id} JWK missing not_before")
+    if not isinstance(na_str, str) or not na_str:
+        raise ValueError(f"foreign key {key_id} JWK missing not_after")
+    nb = _parse_iso8601(nb_str)
+    na = _parse_iso8601(na_str)
+    if nb is None:
+        raise ValueError(f"foreign key {key_id} JWK has invalid not_before: {nb_str!r}")
+    if na is None:
+        raise ValueError(f"foreign key {key_id} JWK has invalid not_after: {na_str!r}")
+    at_utc = at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+    if at_utc < nb:
+        raise KeyExpired(
+            f"foreign key {key_id} not yet valid",
+            {"key_id": key_id, "not_before": nb_str, "at": at_utc.isoformat()},
+        )
+    if at_utc > na:
+        raise KeyExpired(
+            f"foreign key {key_id} expired",
+            {"key_id": key_id, "not_after": na_str, "at": at_utc.isoformat()},
+        )
+
+
+def _parse_iso8601(value: str) -> datetime | None:
+    """Parse an ISO 8601 timestamp into an aware UTC datetime, or None."""
+    s = value
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _parse_max_age(headers: dict[str, str]) -> int:
