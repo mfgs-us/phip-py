@@ -12,6 +12,10 @@ about physical objects across organizational boundaries.
 > **Status:** `0.1.0a2` (alpha). Implements PhIP spec `0.1.0-draft`,
 > which itself is unstable until v1.0. Expect breaking changes.
 
+> **Tutorial:** [TUTORIAL.md](./TUTORIAL.md) walks through sign / verify
+> / chain / Client / bundle / capability tokens with runnable code.
+> Standalone scripts in [`examples/`](./examples/).
+
 ## Install
 
 ```bash
