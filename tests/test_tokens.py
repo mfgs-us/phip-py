@@ -159,6 +159,10 @@ def test_parse_rejects_garbage() -> None:
         parse_token("not-a-token")
     with pytest.raises(InvalidCapability):
         parse_token(base64.urlsafe_b64encode(b"not json").rstrip(b"=").decode())
-    bad_json = base64.urlsafe_b64encode(json.dumps({"not": "a token"}).encode()).rstrip(b"=").decode()
+    bad_json = (
+        base64.urlsafe_b64encode(json.dumps({"not": "a token"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
     with pytest.raises(InvalidCapability):
         parse_token(bad_json)

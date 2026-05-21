@@ -107,8 +107,16 @@ def test_invalid_transition_typed(httpx_mock, client: Client) -> None:
 
 def test_history_pagination_params(httpx_mock, client: Client) -> None:
     httpx_mock.add_response(
-        url="https://acme.example/.well-known/phip/history/parts/widget-001?limit=50&order=desc&cursor=abc",
-        json={"phip_id": "phip://acme.example/parts/widget-001", "history_length": 200, "events": [], "next_cursor": None},
+        url=(
+            "https://acme.example/.well-known/phip/history/parts/widget-001"
+            "?limit=50&order=desc&cursor=abc"
+        ),
+        json={
+            "phip_id": "phip://acme.example/parts/widget-001",
+            "history_length": 200,
+            "events": [],
+            "next_cursor": None,
+        },
     )
     page = client.history(
         "phip://acme.example/parts/widget-001", limit=50, order="desc", cursor="abc"

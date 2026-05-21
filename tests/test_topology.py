@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 from datetime import datetime, timezone
 
 import pytest
@@ -44,7 +43,7 @@ def test_vector_cases_verify(topology_cases, keys):
         if "pages" in c:
             # Multi-page case: each page independently, plus inter-page link.
             expected_sigs = c["expected"]["page_signatures_verify"]
-            for page, expected_sig in zip(c["pages"], expected_sigs):
+            for page, expected_sig in zip(c["pages"], expected_sigs, strict=True):
                 if expected_sig:
                     verify_topology_response(page, pub)  # must not raise
                 else:
@@ -133,7 +132,6 @@ def test_build_and_verify_round_trip(keys):
 def test_verify_rejects_envelope_with_swapped_phip_id(keys):
     """Tamper resistance: mutating phip_id after signing fails verification."""
     kp = keys["test-key-alice"]
-    from phip.events import hash_event
 
     evt0 = {
         "event_id": "10000000-0000-4000-a000-000000000001",
@@ -241,7 +239,6 @@ def test_stitch_pages_handles_empty_leading_page(keys):
     the first NON-EMPTY page, not the first iteration position. A leading
     empty page must not break the 'genesis' invariant."""
     kp = keys["test-key-alice"]
-    from phip.events import hash_event
 
     evt0 = {
         "event_id": "10000000-0000-4000-a000-000000000001",
@@ -388,7 +385,6 @@ def test_verify_first_page_requires_genesis_marker(keys):
     """verify_first_page rejects a topology whose first entry's previous_hash
     is not the literal 'genesis'."""
     kp = keys["test-key-alice"]
-    from phip.events import hash_event
 
     evt0 = {
         "event_id": "10000000-0000-4000-a000-000000000001",

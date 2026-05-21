@@ -13,7 +13,6 @@ from phip.federation import (
     is_private_address,
 )
 
-
 # ── private-address filter — matches the Node reference's coverage ──
 
 
@@ -129,13 +128,13 @@ async def test_resolve_key_against_reference(reference_server) -> None:
     # Reuse the integration_reference fixture pattern: spin our own
     # short-lived reference here (the existing fixture is for sync
     # tests; this is async-only).
-    REFERENCE_PATH = Path(
+    reference_path = Path(
         os.environ.get(
             "PHIP_REFERENCE_PATH",
             Path(__file__).resolve().parents[2] / "phip" / "reference",
         )
     ).resolve()
-    if not REFERENCE_PATH.exists() or not (REFERENCE_PATH / "node_modules").exists():
+    if not reference_path.exists() or not (reference_path / "node_modules").exists():
         pytest.skip("reference resolver unavailable")
 
     with socket.socket() as s:
@@ -143,9 +142,9 @@ async def test_resolve_key_against_reference(reference_server) -> None:
         port = s.getsockname()[1]
     authority = "fed-test.local"
     proc = subprocess.Popen(
-        ["node", str(REFERENCE_PATH / "src" / "index.js")],
+        ["node", str(reference_path / "src" / "index.js")],
         env={**os.environ, "PHIP_AUTHORITY": authority, "PHIP_PORT": str(port)},
-        cwd=REFERENCE_PATH,
+        cwd=reference_path,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
