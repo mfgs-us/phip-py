@@ -171,6 +171,14 @@ def verify_topology_response(
     sig = response.get("topology_signature")
     if not isinstance(sig, dict) or not isinstance(sig.get("value"), str):
         raise InvalidEvent("topology response missing or malformed topology_signature")
+    sig_algo = sig.get("algorithm")
+    if sig_algo != "Ed25519":
+        # PhIP v0.1 is Ed25519-only (schema enforces const "Ed25519").
+        # Reject anything else explicitly so callers get a clear error
+        # instead of an opaque "signature malformed" from the verifier.
+        raise InvalidEvent(
+            f"topology_signature.algorithm is {sig_algo!r}, only 'Ed25519' is supported",
+        )
 
     disclosure = response.get("disclosure")
     if disclosure != DISCLOSURE_TOPOLOGY:
@@ -236,17 +244,33 @@ def verify_first_page(response: TopologyResponse, public_key: Ed25519PublicKey) 
         )
 
 
-def stitch_pages(pages: Iterable[TopologyResponse]) -> list[TopologyEntry]:
+def stitch_pages(
+    pages: Iterable[TopologyResponse],
+    *,
+    public_key: Ed25519PublicKey | None = None,
+) -> list[TopologyEntry]:
     """Concatenate paginated topology slices into a single list, asserting
     the inter-page chain link.
 
-    Each page is assumed already verified via ``verify_topology_response``.
-    Raises ``InvalidEvent`` if any page's first entry doesn't link to the
-    previous page's last entry.
+    If ``public_key`` is provided, each non-empty page's full envelope is
+    verified via ``verify_topology_response`` before stitching — this is
+    the recommended ergonomic shortcut for callers that want a single
+    verified flat list. If ``public_key`` is None, the caller is
+    responsible for having verified each page beforehand.
+
+    Raises:
+        InvalidEvent: any page's first entry doesn't link to the
+            previously-seen last event_hash (or to ``"genesis"`` for
+            the first non-empty page), or — when ``public_key`` is
+            supplied — any per-page structural check fails.
+        InvalidSignature: when ``public_key`` is supplied and a page's
+            ``topology_signature`` does not verify.
     """
     flat: list[TopologyEntry] = []
     prev_last_hash: str | None = None
     for i, page in enumerate(pages):
+        if public_key is not None:
+            verify_topology_response(page, public_key)
         topology = page.get("topology") or []
         if not topology:
             continue

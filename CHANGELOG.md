@@ -41,11 +41,40 @@ Tracks the same `0.1.0-draft` spec version; library bump per VERSIONING.md
   scope per the §11.3.1 SHOULD; `verify_token` skips the
   `requesting_actor` match when `granted_to == "*"`.
 
+### Tightened (defensive verification)
+
+`verify_topology_response` enforces structural invariants that the JSON
+Schema declares but that a client without a schema validator would
+otherwise let through:
+
+- Each topology entry MUST contain EXACTLY the five canonical fields
+  (`event_id`, `type`, `timestamp`, `previous_hash`, `event_hash`).
+  Catches resolvers that leak `payload` / `actor` / `signature`
+  per-entry even when the envelope signature happens to verify.
+- `topology_signature.algorithm` MUST be `"Ed25519"`. Other algorithms
+  raise `InvalidEvent` rather than failing opaquely inside the
+  cryptographic verifier.
+- `phip_id` MUST be a non-empty string — replaces a latent `KeyError`
+  on malformed responses.
+
+`mint_token` rejects empty `granted_to` (consistent with the existing
+empty-`object_filter` rejection), and uses an allowlist
+(`_STAR_SAFE_SCOPES = {"read_topology"}`) for `granted_to='*'`
+issuance so future scopes added to `_VALID_SCOPES` must be explicitly
+considered for `"*"` compatibility instead of silently bypassing a
+denylist.
+
+`stitch_pages(pages, public_key=...)` now optionally verifies each
+non-empty page's full envelope before stitching — the recommended
+single-call shortcut for callers that want a verified flat list.
+Without `public_key`, behavior is unchanged: stitch only, caller is
+responsible for prior verification.
+
 ### Tests
 
-11 new topology tests + 4 new token tests; suite total **111
-passing** (was 107), 7 unrelated skips (reference resolver not
-present in CI).
+15 new topology tests + 5 new token tests + the round-2 defensive
+checks; suite total **118 passing** (was 107), 7 unrelated skips
+(reference resolver not present in CI).
 
 The shared test vectors at
 `tests/vectors/topology/cases.json` mirror the canonical set landed in

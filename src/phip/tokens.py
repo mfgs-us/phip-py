@@ -85,6 +85,10 @@ def mint_token(
         raise ValueError(f"unknown scope {scope!r}; valid: {sorted(_VALID_SCOPES)}")
     if not object_filter:
         raise ValueError("object_filter MUST be a non-empty glob pattern")
+    if not granted_to:
+        raise ValueError(
+            "granted_to MUST be a non-empty PhIP URI or the literal '*'"
+        )
     if granted_to == GRANTED_TO_ANYONE and scope not in _STAR_SAFE_SCOPES:
         # §11.3.1: "*" tokens SHOULD only be issued for low-leakage scopes.
         # Operators who deliberately want an authority-wide grant for a

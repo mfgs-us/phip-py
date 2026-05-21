@@ -271,6 +271,119 @@ def test_stitch_pages_handles_empty_leading_page(keys):
     assert flat[0]["previous_hash"] == "genesis"
 
 
+def test_verify_rejects_entry_missing_event_hash(keys):
+    """Missing fields on an entry are caught by the same set-equality check
+    that catches extra fields."""
+    kp = keys["test-key-alice"]
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    entry = topology_entry_for(evt0)
+    del entry["event_hash"]
+    response = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[entry],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    with pytest.raises(InvalidEvent):
+        verify_topology_response(response, kp["pub"])
+
+
+def test_verify_rejects_non_ed25519_algorithm(keys):
+    """topology_signature.algorithm MUST be 'Ed25519' (§11.5.6.4)."""
+    kp = keys["test-key-alice"]
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    response = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[topology_entry_for(evt0)],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    response["topology_signature"]["algorithm"] = "Ed448"
+    with pytest.raises(InvalidEvent):
+        verify_topology_response(response, kp["pub"])
+
+
+def test_stitch_pages_with_public_key_verifies_each_page(keys):
+    """stitch_pages(pages, public_key=...) verifies each non-empty page."""
+    kp = keys["test-key-alice"]
+    from phip.events import hash_event
+
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    evt1 = {
+        "event_id": "10000000-0000-4000-a000-000000000002",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "state_transition",
+        "timestamp": "2026-01-22T14:30:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": hash_event(evt0),
+        "payload": {"from": "design", "to": "qualified"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    page1 = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[topology_entry_for(evt0)],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    page2 = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[topology_entry_for(evt1)],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    flat = stitch_pages([page1, page2], public_key=kp["pub"])
+    assert len(flat) == 2
+
+    # Tampering one page's phip_id post-sign → stitch refuses.
+    page2["phip_id"] = "phip://acme.example/projects/widget-IMPOSTER"
+    from phip.errors import InvalidSignature
+    with pytest.raises(InvalidSignature):
+        stitch_pages([page1, page2], public_key=kp["pub"])
+
+
+def test_mint_token_rejects_empty_granted_to(keys):
+    kp = keys["test-key-alice"]
+    with pytest.raises(ValueError):
+        mint_token(
+            granted_by="phip://acme.example/keys/test-key-alice",
+            granted_to="",
+            scope="read_topology",
+            object_filter="phip://acme.example/*",
+            not_before="2026-01-01T00:00:00Z",
+            expires="2099-01-01T00:00:00Z",
+            private_key=kp["kp"].private,
+            key_id="phip://acme.example/keys/test-key-alice",
+            token_id="00000000-0000-4000-a000-0000000000ee",
+        )
+
+
 def test_verify_first_page_requires_genesis_marker(keys):
     """verify_first_page rejects a topology whose first entry's previous_hash
     is not the literal 'genesis'."""
