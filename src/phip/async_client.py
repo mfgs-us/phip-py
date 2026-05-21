@@ -95,8 +95,10 @@ class AsyncClient:
     ) -> dict[str, Any]:
         """GET an object's history in topology mode (§11.5.6).
 
-        See ``Client.get_topology`` for response shape and verification
-        guidance. Topology is always ascending.
+        See ``Client.get_topology`` for response shape, verification
+        requirements (callers MUST verify the signature and chain via
+        ``phip.topology.verify_topology_response`` before trusting),
+        and rationale for not exposing ``?order``.
         """
         ns, local_id = self._split_local(phip_id)
         params: dict[str, str] = {"limit": str(limit), "disclosure": "topology"}

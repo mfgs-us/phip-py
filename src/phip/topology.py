@@ -49,6 +49,11 @@ TOPOLOGY_FIELDS_SIGNED: tuple[str, ...] = (
 )
 """The four canonical fields the topology_signature covers (§11.5.6.4)."""
 
+_TOPOLOGY_ENTRY_FIELDS: frozenset[str] = frozenset(
+    {"event_id", "type", "timestamp", "previous_hash", "event_hash"}
+)
+"""The exactly-five fields a topology entry MUST contain (§11.5.6.3)."""
+
 
 # ── projection ────────────────────────────────────────────────────────
 
@@ -118,14 +123,15 @@ def build_topology_envelope(
 
 
 def walk_topology_chain(topology: list[TopologyEntry]) -> int | None:
-    """Walk the chain links within a page. Returns the 1-based index of
-    the first break, or None if the chain is fully consistent.
+    """Walk the chain links within a page. Returns the 0-based index of
+    the entry whose ``previous_hash`` does not match the prior entry's
+    ``event_hash`` (i.e., the first break), or None if the chain is
+    fully consistent.
 
-    For entry N > 0, ``entry[N].previous_hash`` MUST equal
-    ``entry[N-1].event_hash``. The first entry's ``previous_hash`` is
-    NOT checked — the caller decides whether it expects ``"genesis"``
-    (first page) or the previous page's last ``event_hash``
-    (subsequent pages).
+    Only entries at index ≥ 1 are checked. The first entry's
+    ``previous_hash`` is NOT checked — the caller decides whether it
+    expects ``"genesis"`` (first page) or the previous page's last
+    ``event_hash`` (subsequent pages).
     """
     for i in range(1, len(topology)):
         if topology[i].get("previous_hash") != topology[i - 1].get("event_hash"):
@@ -172,6 +178,10 @@ def verify_topology_response(
             f"topology response disclosure marker is {disclosure!r}, expected 'topology'",
         )
 
+    phip_id = response.get("phip_id")
+    if not isinstance(phip_id, str):
+        raise InvalidEvent("topology response missing or non-string phip_id")
+
     topology = response.get("topology")
     if not isinstance(topology, list):
         raise InvalidEvent("topology field is not a list")
@@ -182,7 +192,22 @@ def verify_topology_response(
             f"page_length ({page_length}) does not match len(topology) ({len(topology)})",
         )
 
-    canonical = _canonical_signed_object(response["phip_id"], topology)
+    # Per §11.5.6.3 each entry MUST contain exactly the five canonical fields.
+    # The schema enforces this on the wire (additionalProperties: false), but
+    # we validate here so clients that never run the JSON Schema validator
+    # still catch resolvers that leak extra fields (notably payload / actor /
+    # signature) per-entry.
+    for i, entry in enumerate(topology):
+        if not isinstance(entry, dict):
+            raise InvalidEvent(f"topology entry {i} is not an object")
+        keys = set(entry.keys())
+        if keys != _TOPOLOGY_ENTRY_FIELDS:
+            raise InvalidEvent(
+                f"topology entry {i} has wrong field set",
+                {"got": sorted(keys), "want": sorted(_TOPOLOGY_ENTRY_FIELDS)},
+            )
+
+    canonical = _canonical_signed_object(phip_id, topology)
     try:
         ok = verify(public_key, canonical_bytes(canonical), sig["value"])
     except ValueError as e:
@@ -226,12 +251,15 @@ def stitch_pages(pages: Iterable[TopologyResponse]) -> list[TopologyEntry]:
         if not topology:
             continue
         first_prev = topology[0].get("previous_hash")
-        expected = "genesis" if i == 0 else prev_last_hash
+        # The first non-empty page must start at genesis; subsequent
+        # non-empty pages must link to the previously-seen last event_hash.
+        # Using `prev_last_hash is None` (not `i == 0`) handles the case
+        # where leading pages are empty.
+        expected = "genesis" if prev_last_hash is None else prev_last_hash
         if first_prev != expected:
             raise InvalidEvent(
                 f"inter-page link break at page {i}: first entry previous_hash "
-                f"{first_prev!r} does not match prior page's last event_hash "
-                f"{expected!r}",
+                f"{first_prev!r} does not match expected {expected!r}",
             )
         flat.extend(topology)
         prev_last_hash = topology[-1].get("event_hash")

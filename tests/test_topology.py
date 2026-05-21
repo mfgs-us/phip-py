@@ -87,24 +87,6 @@ def test_walk_topology_chain_detects_break(topology_cases):
 # ── round-trip via the build/verify helpers ──────────────────────────
 
 
-def _make_event(*, evt_id: str, prev: str, kp_id: str = "test-key-alice") -> dict:
-    """A minimal signed event for round-trip testing."""
-    return {
-        "event_id": evt_id,
-        "phip_id": "phip://acme.example/projects/widget-v3",
-        "type": "state_transition",
-        "timestamp": "2026-02-01T10:00:00Z",
-        "actor": "phip://acme.example/keys/test-key-alice",
-        "previous_hash": prev,
-        "payload": {"from": "design", "to": "qualified"},
-        "signature": {
-            "algorithm": "Ed25519",
-            "key_id": "phip://acme.example/keys/test-key-alice",
-            "value": "AA",  # signatures aren't recomputed for this test
-        },
-    }
-
-
 def test_build_and_verify_round_trip(keys):
     """build_topology_envelope produces an output that verify_topology_response accepts."""
     kp = keys["test-key-alice"]
@@ -198,6 +180,95 @@ def test_verify_rejects_extra_fields_in_signed_object(keys):
     response["served_at"] = "2026-05-20T12:00:00Z"
     response["request_id"] = "req-abc-123"
     verify_topology_response(response, kp["pub"])  # must not raise
+
+
+def test_verify_rejects_response_missing_phip_id(keys):
+    """Malformed response without phip_id → InvalidEvent, not KeyError."""
+    kp = keys["test-key-alice"]
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    response = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[topology_entry_for(evt0)],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    del response["phip_id"]
+    with pytest.raises(InvalidEvent):
+        verify_topology_response(response, kp["pub"])
+
+
+def test_verify_rejects_entry_with_extra_fields(keys):
+    """Each topology entry MUST contain exactly the five canonical fields
+    (§11.5.6.3). A resolver that leaks payload/actor/signature per-entry
+    must be caught even if the envelope signature happens to verify."""
+    kp = keys["test-key-alice"]
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    # Build a normal entry, then add a forbidden extra field BEFORE signing,
+    # so the signature is over the tampered shape (verifier would otherwise
+    # only see a signature-mismatch).
+    entry = topology_entry_for(evt0)
+    entry["payload"] = {"leaked": "data"}
+    response = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[entry],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    with pytest.raises(InvalidEvent):
+        verify_topology_response(response, kp["pub"])
+
+
+def test_stitch_pages_handles_empty_leading_page(keys):
+    """stitch_pages must use 'genesis' as the expected previous_hash for
+    the first NON-EMPTY page, not the first iteration position. A leading
+    empty page must not break the 'genesis' invariant."""
+    kp = keys["test-key-alice"]
+    from phip.events import hash_event
+
+    evt0 = {
+        "event_id": "10000000-0000-4000-a000-000000000001",
+        "phip_id": "phip://acme.example/projects/widget-v3",
+        "type": "created",
+        "timestamp": "2026-01-15T09:00:00Z",
+        "actor": "phip://acme.example/keys/test-key-alice",
+        "previous_hash": "genesis",
+        "payload": {"object_type": "design", "state": "design"},
+        "signature": {"algorithm": "Ed25519", "key_id": "x", "value": "AA"},
+    }
+    # Empty page first, real page second.
+    empty_page = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    real_page = build_topology_envelope(
+        phip_id="phip://acme.example/projects/widget-v3",
+        topology=[topology_entry_for(evt0)],
+        private_key=kp["kp"].private,
+        key_id="phip://acme.example/keys/test-key-alice",
+    )
+    flat = stitch_pages([empty_page, real_page])
+    assert len(flat) == 1
+    assert flat[0]["previous_hash"] == "genesis"
 
 
 def test_verify_first_page_requires_genesis_marker(keys):

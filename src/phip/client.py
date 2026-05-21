@@ -124,8 +124,15 @@ class Client:
 
         Returns the topology response envelope:
         ``{phip_id, page_length, disclosure, topology, topology_signature,
-        next_cursor}``. Use ``phip.topology.verify_topology_response`` to
-        verify the signature and chain walk before trusting the result.
+        next_cursor}``.
+
+        The response is signed and chain-walkable, but this method does
+        NOT verify it for you. Callers MUST pass the response to
+        ``phip.topology.verify_topology_response(response, public_key)``
+        (or ``verify_first_page`` if this is the first page) before
+        trusting any field. For paginated reads, also call
+        ``phip.topology.stitch_pages`` across the page list to confirm
+        the inter-page chain link.
 
         Topology is always returned in ascending chain order (§11.5.6.5);
         the ``?order`` parameter from ``history()`` is intentionally

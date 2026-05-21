@@ -52,6 +52,12 @@ requesting-actor match. Intended for low-leakage scopes — notably
 or any push scope is effectively a publication and SHOULD be rejected
 at policy-review time."""
 
+_STAR_SAFE_SCOPES: frozenset[str] = frozenset({"read_topology"})
+"""Scopes for which ``granted_to='*'`` (presenter-anonymous) issuance
+is permitted by ``mint_token``. Allowlist by design: when adding a new
+scope to ``_VALID_SCOPES``, a maintainer MUST consider whether the new
+scope is safe to combine with ``"*"`` and add it here explicitly."""
+
 
 def mint_token(
     *,
@@ -79,19 +85,16 @@ def mint_token(
         raise ValueError(f"unknown scope {scope!r}; valid: {sorted(_VALID_SCOPES)}")
     if not object_filter:
         raise ValueError("object_filter MUST be a non-empty glob pattern")
-    if granted_to == GRANTED_TO_ANYONE and scope not in {"read_topology"}:
+    if granted_to == GRANTED_TO_ANYONE and scope not in _STAR_SAFE_SCOPES:
         # §11.3.1: "*" tokens SHOULD only be issued for low-leakage scopes.
-        # The library refuses outright for write scopes and read_history /
-        # read_query, which would effectively publish the resource. Operators
-        # who deliberately want an authority-wide grant can bypass by
-        # constructing the dict by hand.
-        if scope.startswith("push_") or scope in {"read_history", "read_query", "read_state"}:
-            raise ValueError(
-                f"granted_to='*' combined with scope={scope!r} is effectively a "
-                "publication; refuse per §11.3.1. Use scope='read_topology' for "
-                "presenter-anonymous tokens, or construct the dict by hand if "
-                "you truly want this."
-            )
+        # Operators who deliberately want an authority-wide grant for a
+        # non-allowlisted scope can construct the dict by hand and sign with
+        # phip.crypto directly.
+        raise ValueError(
+            f"granted_to='*' combined with scope={scope!r} is effectively a "
+            f"publication; refuse per §11.3.1. Allowed star-safe scopes: "
+            f"{sorted(_STAR_SAFE_SCOPES)}."
+        )
     unsigned: Token = {
         "phip_capability": "1.0",
         "token_id": token_id,
@@ -171,11 +174,19 @@ def verify_token(
 
       2. Cryptographic signature against ``public_key``.
       3. Validity window vs ``verification_time`` (defaults to now).
-      4. ``granted_to`` matches ``requesting_actor`` (skipped if None).
+      4. ``granted_to`` matches ``requesting_actor`` (skipped if None, and
+         also skipped when ``granted_to == "*"`` per §11.3.1).
       5. ``object_filter`` matches ``requested_object`` (skipped if None).
       6. ``scope`` covers ``requested_scope`` (skipped if None).
 
     Step 1 (decoding) is ``parse_token``; pass the dict here.
+
+    Note: this function does NOT enforce the ``mint_token`` policy that
+    refuses ``granted_to='*'`` combined with high-leakage scopes. A token
+    that escaped that mint-time guard (issued by another tool, hand-crafted,
+    or pre-existing) verifies here as long as it is cryptographically
+    valid. The ``"*"`` SHOULD-restriction is at issuance time per §11.3.1;
+    verification side honors whatever the authority signed.
 
     Raises:
         InvalidSignature: signature failed (401 in HTTP terms).
