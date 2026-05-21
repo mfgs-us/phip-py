@@ -20,7 +20,8 @@ This module covers:
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -29,8 +30,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 
 from phip.canonicalize import canonical_bytes
 from phip.crypto import sign, verify
-from phip.events import Event, hash_event
 from phip.errors import InvalidEvent, InvalidSignature
+from phip.events import Event, hash_event
 
 TopologyEntry = dict[str, Any]
 """One entry in a topology response: event_id, type, timestamp,

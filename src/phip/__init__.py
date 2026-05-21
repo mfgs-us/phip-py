@@ -80,7 +80,14 @@ from phip.errors import (
 )
 from phip.events import Event, hash_event, sign_event, verify_chain, verify_event
 from phip.federation import FederationClient
-from phip.tokens import GRANTED_TO_ANYONE, Token, encode_token, mint_token, parse_token, verify_token
+from phip.tokens import (
+    GRANTED_TO_ANYONE,
+    Token,
+    encode_token,
+    mint_token,
+    parse_token,
+    verify_token,
+)
 from phip.topology import (
     DISCLOSURE_TOPOLOGY,
     TOPOLOGY_FIELDS_SIGNED,

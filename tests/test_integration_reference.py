@@ -27,14 +27,13 @@ from pathlib import Path
 import pytest
 
 from phip import (
-    Client,
     ChainConflict,
+    Client,
     ObjectExists,
     ObjectNotFound,
     generate_keypair,
     sign_event,
 )
-
 
 REFERENCE_PATH = Path(
     os.environ.get(
