@@ -39,9 +39,24 @@ _VALID_SCOPES: frozenset[str] = frozenset(
         "push_relations",
         "read_state",
         "read_history",
+        "read_topology",
         "read_query",
     }
 )
+
+GRANTED_TO_ANYONE = "*"
+"""Sentinel for presenter-anonymous tokens (§11.3.1). When a token's
+``granted_to`` is this literal string, ``verify_token`` skips the
+requesting-actor match. Intended for low-leakage scopes — notably
+``read_topology``; using ``"*"`` with ``read_history``, ``read_query``,
+or any push scope is effectively a publication and SHOULD be rejected
+at policy-review time."""
+
+_STAR_SAFE_SCOPES: frozenset[str] = frozenset({"read_topology"})
+"""Scopes for which ``granted_to='*'`` (presenter-anonymous) issuance
+is permitted by ``mint_token``. Allowlist by design: when adding a new
+scope to ``_VALID_SCOPES``, a maintainer MUST consider whether the new
+scope is safe to combine with ``"*"`` and add it here explicitly."""
 
 
 def mint_token(
@@ -70,6 +85,20 @@ def mint_token(
         raise ValueError(f"unknown scope {scope!r}; valid: {sorted(_VALID_SCOPES)}")
     if not object_filter:
         raise ValueError("object_filter MUST be a non-empty glob pattern")
+    if not granted_to:
+        raise ValueError(
+            "granted_to MUST be a non-empty PhIP URI or the literal '*'"
+        )
+    if granted_to == GRANTED_TO_ANYONE and scope not in _STAR_SAFE_SCOPES:
+        # §11.3.1: "*" tokens SHOULD only be issued for low-leakage scopes.
+        # Operators who deliberately want an authority-wide grant for a
+        # non-allowlisted scope can construct the dict by hand and sign with
+        # phip.crypto directly.
+        raise ValueError(
+            f"granted_to='*' combined with scope={scope!r} is effectively a "
+            f"publication; refuse per §11.3.1. Allowed star-safe scopes: "
+            f"{sorted(_STAR_SAFE_SCOPES)}."
+        )
     unsigned: Token = {
         "phip_capability": "1.0",
         "token_id": token_id,
@@ -149,11 +178,19 @@ def verify_token(
 
       2. Cryptographic signature against ``public_key``.
       3. Validity window vs ``verification_time`` (defaults to now).
-      4. ``granted_to`` matches ``requesting_actor`` (skipped if None).
+      4. ``granted_to`` matches ``requesting_actor`` (skipped if None, and
+         also skipped when ``granted_to == "*"`` per §11.3.1).
       5. ``object_filter`` matches ``requested_object`` (skipped if None).
       6. ``scope`` covers ``requested_scope`` (skipped if None).
 
     Step 1 (decoding) is ``parse_token``; pass the dict here.
+
+    Note: this function does NOT enforce the ``mint_token`` policy that
+    refuses ``granted_to='*'`` combined with high-leakage scopes. A token
+    that escaped that mint-time guard (issued by another tool, hand-crafted,
+    or pre-existing) verifies here as long as it is cryptographically
+    valid. The ``"*"`` SHOULD-restriction is at issuance time per §11.3.1;
+    verification side honors whatever the authority signed.
 
     Raises:
         InvalidSignature: signature failed (401 in HTTP terms).
@@ -183,11 +220,16 @@ def verify_token(
     if exp is not None and now > exp:
         raise InvalidCapability("token has expired", {"expires": token.get("expires")})
 
-    # Step 4: granted_to.
-    if requesting_actor is not None and token.get("granted_to") != requesting_actor:
+    # Step 4: granted_to. The literal "*" disables this check (§11.3.1).
+    granted_to = token.get("granted_to")
+    if (
+        requesting_actor is not None
+        and granted_to != GRANTED_TO_ANYONE
+        and granted_to != requesting_actor
+    ):
         raise InvalidCapability(
             "token granted_to does not match requesting actor",
-            {"granted_to": token.get("granted_to"), "requesting_actor": requesting_actor},
+            {"granted_to": granted_to, "requesting_actor": requesting_actor},
         )
 
     # Step 5: object_filter.
@@ -206,6 +248,9 @@ def verify_token(
             return
         # read_history covers read_state per §11.5.2.
         if requested_scope == "read_state" and token_scope == "read_history":
+            return
+        # read_history MAY also serve topology requests per §11.5.6.2.
+        if requested_scope == "read_topology" and token_scope == "read_history":
             return
         raise InvalidCapability(
             f"token scope {token_scope!r} does not cover requested {requested_scope!r}",

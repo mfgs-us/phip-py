@@ -80,7 +80,26 @@ from phip.errors import (
 )
 from phip.events import Event, hash_event, sign_event, verify_chain, verify_event
 from phip.federation import FederationClient
-from phip.tokens import Token, encode_token, mint_token, parse_token, verify_token
+from phip.tokens import (
+    GRANTED_TO_ANYONE,
+    Token,
+    encode_token,
+    mint_token,
+    parse_token,
+    verify_token,
+)
+from phip.topology import (
+    DISCLOSURE_TOPOLOGY,
+    TOPOLOGY_FIELDS_SIGNED,
+    TopologyEntry,
+    TopologyResponse,
+    build_topology_envelope,
+    stitch_pages,
+    topology_entry_for,
+    verify_first_page,
+    verify_topology_response,
+    walk_topology_chain,
+)
 from phip.uri import PhipUri, authority_of, format_uri, parse_uri
 
 __all__ = [
@@ -128,11 +147,23 @@ __all__ = [
     "verify_chain",
     "verify_event",
     # Tokens
+    "GRANTED_TO_ANYONE",
     "Token",
     "encode_token",
     "mint_token",
     "parse_token",
     "verify_token",
+    # Topology disclosure (§11.5.6)
+    "DISCLOSURE_TOPOLOGY",
+    "TOPOLOGY_FIELDS_SIGNED",
+    "TopologyEntry",
+    "TopologyResponse",
+    "build_topology_envelope",
+    "stitch_pages",
+    "topology_entry_for",
+    "verify_first_page",
+    "verify_topology_response",
+    "walk_topology_chain",
     # Clients
     "AsyncClient",
     "Client",

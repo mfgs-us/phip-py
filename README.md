@@ -9,7 +9,7 @@ Python client library for the
 federated protocol for addressing, querying, and exchanging information
 about physical objects across organizational boundaries.
 
-> **Status:** `0.1.0a2` (alpha). Implements PhIP spec `0.1.0-draft`,
+> **Status:** `0.1.0a3` (alpha). Implements PhIP spec `0.1.0-draft`,
 > which itself is unstable until v1.0. Expect breaking changes.
 
 > **Tutorial:** [TUTORIAL.md](./TUTORIAL.md) walks through sign / verify
@@ -93,6 +93,14 @@ first-class. The library covers:
   ceiling, 1 MiB response cap)
 - PhIP bundle pack / unpack / verify (`phip.bundle.make_bundle`,
   `pack_bundle`, `unpack_bundle`, `verify_bundle`)
+- **Topology disclosure** (§11.5.6) via `phip.topology`:
+  `Client.get_topology` / `AsyncClient.get_topology` issue
+  `?disclosure=topology` requests; `build_topology_envelope` /
+  `verify_topology_response` / `stitch_pages` cover the
+  envelope-signed shape with per-entry `event_hash` chain-walk
+  verification. `read_topology` scope and `GRANTED_TO_ANYONE = "*"`
+  presenter-anonymous grants supported in `mint_token` /
+  `verify_token`.
 
 Coming later:
 

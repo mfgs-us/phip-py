@@ -112,6 +112,41 @@ class Client:
             "GET", path, params=params, headers=self._auth_headers(capability_token)
         )
 
+    def get_topology(
+        self,
+        phip_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        capability_token: str | None = None,
+    ) -> dict[str, Any]:
+        """GET an object's history in topology mode (§11.5.6).
+
+        Returns the topology response envelope:
+        ``{phip_id, page_length, disclosure, topology, topology_signature,
+        next_cursor}``.
+
+        The response is signed and chain-walkable, but this method does
+        NOT verify it for you. Callers MUST pass the response to
+        ``phip.topology.verify_topology_response(response, public_key)``
+        (or ``verify_first_page`` if this is the first page) before
+        trusting any field. For paginated reads, also call
+        ``phip.topology.stitch_pages`` across the page list to confirm
+        the inter-page chain link.
+
+        Topology is always returned in ascending chain order (§11.5.6.5);
+        the ``?order`` parameter from ``history()`` is intentionally
+        omitted here.
+        """
+        ns, local_id = self._split_local(phip_id)
+        params: dict[str, str] = {"limit": str(limit), "disclosure": "topology"}
+        if cursor is not None:
+            params["cursor"] = cursor
+        path = f"/.well-known/phip/history/{quote(ns)}/{_quote_path(local_id)}"
+        return self._request(
+            "GET", path, params=params, headers=self._auth_headers(capability_token)
+        )
+
     def query(
         self,
         namespace: str,

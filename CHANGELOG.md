@@ -5,6 +5,81 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this library follows [SemVer](https://semver.org/) and pins to spec
 MAJOR per the PhIP [VERSIONING.md](https://github.com/mfgs-us/phip/blob/main/VERSIONING.md).
 
+## [0.1.0a3] — Unreleased
+
+Implements PhIP spec topology disclosure (§11.5.6), which landed in the
+spec repo via [mfgs-us/phip#10](https://github.com/mfgs-us/phip/pull/10).
+Tracks the same `0.1.0-draft` spec version; library bump per VERSIONING.md
+"library MINOR tracks spec MINOR additions".
+
+### Added
+
+- **`phip.topology` module** — full client-side support for §11.5.6:
+  - `topology_entry_for(event)` — project a full event into its five
+    topology fields (event_id, type, timestamp, previous_hash,
+    event_hash)
+  - `build_topology_envelope(...)` — assemble + sign a topology
+    response envelope. Signature covers exactly the four canonical
+    fields `{disclosure, page_length, phip_id, topology}` per §11.5.6.4
+  - `verify_topology_response(response, public_key)` — end-to-end
+    verification: signature, page_length consistency, disclosure
+    marker, in-page chain walk
+  - `verify_first_page(...)` — also asserts `entry[0].previous_hash ==
+    "genesis"` (for first-page responses)
+  - `walk_topology_chain(topology)` — returns the index of the first
+    chain break or `None`
+  - `stitch_pages(pages)` — concatenate paginated topology slices,
+    asserting inter-page `previous_hash`/`event_hash` continuity
+- **`Client.get_topology(...)`** and **`AsyncClient.get_topology(...)`**
+  — high-level GET-history-with-`?disclosure=topology` helper.
+- **`read_topology` scope** added to `_VALID_SCOPES` in
+  `phip.tokens`. `mint_token` accepts it; `verify_token` correctly
+  treats `read_history` as covering `read_topology` requests.
+- **`GRANTED_TO_ANYONE = "*"`** sentinel exported from `phip.tokens`
+  for presenter-anonymous grants. `mint_token` refuses `"*"` combined
+  with `read_history`, `read_query`, `read_state`, or any `push_*`
+  scope per the §11.3.1 SHOULD; `verify_token` skips the
+  `requesting_actor` match when `granted_to == "*"`.
+
+### Tightened (defensive verification)
+
+`verify_topology_response` enforces structural invariants that the JSON
+Schema declares but that a client without a schema validator would
+otherwise let through:
+
+- Each topology entry MUST contain EXACTLY the five canonical fields
+  (`event_id`, `type`, `timestamp`, `previous_hash`, `event_hash`).
+  Catches resolvers that leak `payload` / `actor` / `signature`
+  per-entry even when the envelope signature happens to verify.
+- `topology_signature.algorithm` MUST be `"Ed25519"`. Other algorithms
+  raise `InvalidEvent` rather than failing opaquely inside the
+  cryptographic verifier.
+- `phip_id` MUST be a non-empty string — replaces a latent `KeyError`
+  on malformed responses.
+
+`mint_token` rejects empty `granted_to` (consistent with the existing
+empty-`object_filter` rejection), and uses an allowlist
+(`_STAR_SAFE_SCOPES = {"read_topology"}`) for `granted_to='*'`
+issuance so future scopes added to `_VALID_SCOPES` must be explicitly
+considered for `"*"` compatibility instead of silently bypassing a
+denylist.
+
+`stitch_pages(pages, public_key=...)` now optionally verifies each
+non-empty page's full envelope before stitching — the recommended
+single-call shortcut for callers that want a verified flat list.
+Without `public_key`, behavior is unchanged: stitch only, caller is
+responsible for prior verification.
+
+### Tests
+
+15 new topology tests + 5 new token tests + the round-2 defensive
+checks; suite total **118 passing** (was 107), 7 unrelated skips
+(reference resolver not present in CI).
+
+The shared test vectors at
+`tests/vectors/topology/cases.json` mirror the canonical set landed in
+mfgs-us/phip; every fixture verifies identically here.
+
 ## [0.1.0a2] — Unreleased
 
 Adds federation client + bundle support.
