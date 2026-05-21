@@ -5,6 +5,52 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this library follows [SemVer](https://semver.org/) and pins to spec
 MAJOR per the PhIP [VERSIONING.md](https://github.com/mfgs-us/phip/blob/main/VERSIONING.md).
 
+## [0.1.0a3] — Unreleased
+
+Implements PhIP spec topology disclosure (§11.5.6), which landed in the
+spec repo via [mfgs-us/phip#10](https://github.com/mfgs-us/phip/pull/10).
+Tracks the same `0.1.0-draft` spec version; library bump per VERSIONING.md
+"library MINOR tracks spec MINOR additions".
+
+### Added
+
+- **`phip.topology` module** — full client-side support for §11.5.6:
+  - `topology_entry_for(event)` — project a full event into its five
+    topology fields (event_id, type, timestamp, previous_hash,
+    event_hash)
+  - `build_topology_envelope(...)` — assemble + sign a topology
+    response envelope. Signature covers exactly the four canonical
+    fields `{disclosure, page_length, phip_id, topology}` per §11.5.6.4
+  - `verify_topology_response(response, public_key)` — end-to-end
+    verification: signature, page_length consistency, disclosure
+    marker, in-page chain walk
+  - `verify_first_page(...)` — also asserts `entry[0].previous_hash ==
+    "genesis"` (for first-page responses)
+  - `walk_topology_chain(topology)` — returns the index of the first
+    chain break or `None`
+  - `stitch_pages(pages)` — concatenate paginated topology slices,
+    asserting inter-page `previous_hash`/`event_hash` continuity
+- **`Client.get_topology(...)`** and **`AsyncClient.get_topology(...)`**
+  — high-level GET-history-with-`?disclosure=topology` helper.
+- **`read_topology` scope** added to `_VALID_SCOPES` in
+  `phip.tokens`. `mint_token` accepts it; `verify_token` correctly
+  treats `read_history` as covering `read_topology` requests.
+- **`GRANTED_TO_ANYONE = "*"`** sentinel exported from `phip.tokens`
+  for presenter-anonymous grants. `mint_token` refuses `"*"` combined
+  with `read_history`, `read_query`, `read_state`, or any `push_*`
+  scope per the §11.3.1 SHOULD; `verify_token` skips the
+  `requesting_actor` match when `granted_to == "*"`.
+
+### Tests
+
+11 new topology tests + 4 new token tests; suite total **111
+passing** (was 107), 7 unrelated skips (reference resolver not
+present in CI).
+
+The shared test vectors at
+`tests/vectors/topology/cases.json` mirror the canonical set landed in
+mfgs-us/phip; every fixture verifies identically here.
+
 ## [0.1.0a2] — Unreleased
 
 Adds federation client + bundle support.

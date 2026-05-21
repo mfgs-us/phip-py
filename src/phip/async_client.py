@@ -85,6 +85,28 @@ class AsyncClient:
             "GET", path, params=params, headers=self._auth_headers(capability_token)
         )
 
+    async def get_topology(
+        self,
+        phip_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        capability_token: str | None = None,
+    ) -> dict[str, Any]:
+        """GET an object's history in topology mode (§11.5.6).
+
+        See ``Client.get_topology`` for response shape and verification
+        guidance. Topology is always ascending.
+        """
+        ns, local_id = self._split_local(phip_id)
+        params: dict[str, str] = {"limit": str(limit), "disclosure": "topology"}
+        if cursor is not None:
+            params["cursor"] = cursor
+        path = f"/.well-known/phip/history/{quote(ns)}/{_quote_path(local_id)}"
+        return await self._request(
+            "GET", path, params=params, headers=self._auth_headers(capability_token)
+        )
+
     async def query(
         self,
         namespace: str,

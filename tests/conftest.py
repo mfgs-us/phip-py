@@ -69,3 +69,8 @@ def token_cases() -> list[dict]:
 @pytest.fixture(scope="session")
 def bundle_cases() -> list[dict]:
     return _load_json("bundle/cases.json")["bundles"]
+
+
+@pytest.fixture(scope="session")
+def topology_cases() -> list[dict]:
+    return _load_json("topology/cases.json")["cases"]
